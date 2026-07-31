@@ -452,14 +452,22 @@ def poll_edgeswitch(conn, ts, inst, errors):
 
         ports_with_errors = 0
         total_errors = 0
+        total_packets = 0
         for iface in data.get("interfaces", []):
             stats = iface.get("statistics", {})
             errs = int(stats.get("errors", 0)) + int(stats.get("dropped", 0) or 0)
             if errs > 0:
                 ports_with_errors += 1
             total_errors += errs
+            total_packets += int(stats.get("rxPackets", 0) or 0) + int(stats.get("txPackets", 0) or 0)
         record(conn, ts, entity, "ports_with_errors", value=ports_with_errors)
         record(conn, ts, entity, "total_port_errors", value=total_errors)
+        # Un contador crudo > 0 termina disparando tarde o temprano en
+        # cualquier puerto con trafico real - guardamos tambien el total de
+        # paquetes para que el frontend calcule tasa (errores/paquetes),
+        # igual que con los uplinks Mikrotik, en vez de mirar el contador
+        # absoluto.
+        record(conn, ts, entity, "total_port_packets", value=total_packets)
     except Exception as e:
         record(conn, ts, entity, "reachable", value=0)
         errors.append(f"{entity}: {type(e).__name__}: {e}")
