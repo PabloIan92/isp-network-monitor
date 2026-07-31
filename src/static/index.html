@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitoreo de Red ISP</title>
+<style>
+  :root {
+    --bg: #0e1116; --card-bg: #161b22; --border: #2a313c; --text: #e6edf3;
+    --muted: #8b949e; --green: #3fb950; --yellow: #d29922; --red: #f85149; --blue: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0; }
+  .header-title { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .freshness { font-size: 13px; padding: 4px 10px; border-radius: 6px; display: inline-block; margin-bottom: 20px; }
+  .fresh-ok { background: rgba(63,185,80,.15); color: var(--green); }
+  .fresh-stale { background: rgba(248,81,73,.15); color: var(--red); }
+  h2.section { font-size: 15px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 28px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; align-items: start; }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .card-title { font-weight: 600; font-size: 14.5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot-green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+  .dot-red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .dot-grey { background: #555; }
+  .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; color: var(--muted); }
+  .row b { color: var(--text); font-weight: 500; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600; }
+  .badge-green { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge-yellow { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .badge-red { background: rgba(248,81,73,.15); color: var(--red); }
+  .uplink { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+  .uplink-name { font-size: 12.5px; color: var(--text); margin-bottom: 2px; }
+  .empty-note { color: var(--muted); font-size: 13px; font-style: italic; }
+  a.link { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="header-title">
+  <h1>Monitoreo de Red ISP</h1>
+</div>
+<div class="subtitle">Mikrotik, OLTs, antenas y switches en un solo panel. Actualiza cada 30s.</div>
+<div style="display:flex; align-items:center; gap:10px;">
+  <div id="freshness" class="freshness fresh-stale">Cargando...</div>
+  <button id="refreshBtn" onclick="refresh()" style="background:var(--card-bg); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:4px 10px; font-size:13px; cursor:pointer;">Actualizar ahora</button>
+</div>
+
+<h2 class="section">Routers Mikrotik</h2>
+<div id="routers" class="grid"></div>
+
+<h2 class="section">OLTs (fibra)</h2>
+<div id="olts" class="grid"></div>
+
+<h2 class="section">Antenas (AirControl)</h2>
+<div id="antennas" class="grid"></div>
+
+<h2 class="section">Netonix</h2>
+<div id="netonix" class="grid"></div>
+
+<h2 class="section">Otros switches</h2>
+<div id="edgeswitches" class="grid"></div>
+
+<script>
+let ROUTERS = [];  // se completa desde /api/config al cargar (name, psu_style, uplinks)
+
+function fmtAgo(sec) {
+  if (sec < 60) return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m";
+  return Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m";
+}
+
+function fmtUptime(s) {
+  if (s == null) return "-";
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return `${d}d ${h}h ${m}m`;
+}
+
+function dot(cls) { return `<span class="dot ${cls}"></span>`; }
+
+function errorRate(hist, fcsMetric, pktMetric) {
+  const fcs = hist[fcsMetric] || [], pkt = hist[pktMetric] || [];
+  if (fcs.length < 2 || pkt.length < 2) return null;
+  const dFcs = fcs[fcs.length - 1].value - fcs[0].value;
+  const dPkt = pkt[pkt.length - 1].value - pkt[0].value;
+  if (dPkt <= 0) return 0;
+  return dFcs / dPkt;
+}
+
+function ipLink(byMetric, defaultScheme) {
+  const ip = byMetric.ip ? byMetric.ip.text_value : null;
+  if (!ip) return "";
+  const scheme = (byMetric.scheme && byMetric.scheme.text_value) || defaultScheme;
+  return `<div class="row"><span>IP</span><a class="link" href="${scheme}://${ip}/" target="_blank">${ip}</a></div>`;
+}
+
+async function loadHistory(entity, metrics, hours) {
+  const out = {};
+  await Promise.all(metrics.map(async m => {
+    const r = await fetch(`api/history?entity=${encodeURIComponent(entity)}&metric=${m}&hours=${hours}`);
+    out[m] = await r.json();
+  }));
+  return out;
+}
+
+function renderRouterCard(name, byMetric, uplinks, historyByUplink, psuStyle) {
+  const reachable = byMetric.reachable && byMetric.reachable.value === 1;
+  const cpu = byMetric.cpu_load ? byMetric.cpu_load.value : null;
+  const temp = byMetric.cpu_temp ? byMetric.cpu_temp.value : null;
+  const uptime = byMetric.uptime_seconds ? byMetric.uptime_seconds.value : null;
+
+  const psu1Fail = byMetric.psu1_state && byMetric.psu1_state.text_value !== "ok";
+  const psu2Fail = byMetric.psu2_state && byMetric.psu2_state.text_value !== "ok";
+  const psuFail = psu1Fail || psu2Fail;
+
+  let statusDot = "dot-grey";
+  if (!reachable) statusDot = "dot-red";
+  else if (psuFail || (cpu != null && cpu > 85) || (temp != null && temp > 65)) statusDot = "dot-red";
+  else if ((cpu != null && cpu > 70) || (temp != null && temp > 55)) statusDot = "dot-yellow";
+  else statusDot = "dot-green";
+
+  let html = `<div class="card">
+    <div class="card-head"><span class="card-title">${dot(statusDot)} ${name}</span></div>`;
+
+  if (!reachable) {
+    html += `<div class="row"><span>Estado</span><b style="color:var(--red)">Sin respuesta SSH</b></div></div>`;
+    return html;
+  }
+
+  html += `
+    <div class="row"><span>CPU</span><b>${cpu != null ? cpu + "%" : "-"}</b></div>
+    <div class="row"><span>Temperatura</span><b>${temp != null ? temp + "C" : "-"}</b></div>
+    <div class="row"><span>Uptime</span><b>${fmtUptime(uptime)}</b></div>`;
+
+  if (psuStyle === "simple_voltage" && byMetric.voltage) {
+    html += `<div class="row"><span>Voltaje</span><b>${byMetric.voltage.value.toFixed(1)}V</b></div>`;
+  } else if (psuStyle === "psu_voltage") {
+    if (byMetric.psu1_voltage) html += `<div class="row"><span>Voltaje PSU1</span><b>${byMetric.psu1_voltage.value.toFixed(1)}V</b></div>`;
+    if (byMetric.psu2_voltage) html += `<div class="row"><span>Voltaje PSU2</span><b>${byMetric.psu2_voltage.value.toFixed(1)}V</b></div>`;
+  } else if (psuStyle === "psu_state") {
+    if (byMetric.psu1_state) html += `<div class="row"><span>PSU1</span><b style="${psu1Fail ? 'color:var(--red)' : ''}">${byMetric.psu1_state.text_value}</b></div>`;
+    if (byMetric.psu2_state) html += `<div class="row"><span>PSU2</span><b style="${psu2Fail ? 'color:var(--red)' : ''}">${byMetric.psu2_state.text_value}</b></div>`;
+  }
+
+  html += ipLink(byMetric, "http");
+
+  for (const up of uplinks) {
+    const status = byMetric[`${up.key}_status`] ? byMetric[`${up.key}_status`].text_value : null;
+    const ok = status === "link-ok";
+    const rate = errorRate(historyByUplink[up.key] || {}, `${up.key}_fcs`, `${up.key}_rxpkt`);
+    let badge = "";
+    if (rate == null) badge = "";
+    else if (rate > 1e-4) badge = `<span class="badge badge-red">error rate alto</span>`;
+    else if (rate > 1e-6) badge = `<span class="badge badge-yellow">revisar</span>`;
+    else badge = `<span class="badge badge-green">ok</span>`;
+
+    html += `<div class="uplink">
+      <div class="uplink-name">${dot(ok ? "dot-green" : "dot-red")} ${up.label}</div>
+      <div class="row"><span>Link</span><b>${status || "-"}</b></div>
+      <div class="row"><span>Tasa error (FCS)</span>${badge}</div>
+    </div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function renderOltCard(name, byMetric) {
+  const total = byMetric.total ? byMetric.total.value : 0;
+  const online = byMetric.online ? byMetric.online.value : 0;
+  const offline = byMetric.offline ? byMetric.offline.value : 0;
+  const semEnergia = byMetric.sem_energia ? byMetric.sem_energia.value : 0;
+  const loss = byMetric.loss ? byMetric.loss.value : 0;
+  const inativo = byMetric.inativo ? byMetric.inativo.value : 0;
+  const desabilitada = byMetric.desabilitada ? byMetric.desabilitada.value : 0;
+  const lowPower = byMetric.low_power ? byMetric.low_power.value : 0;
+  const pct = total > 0 ? (online / total) * 100 : 100;
+
+  // "Sin energia" (corte de luz del cliente) e "Inativo"/"Desabilitada"
+  // (estados administrativos) no son fallas de red/fibra que podamos
+  // resolver nosotros, asi que no cuentan para el semaforo - solo LOSS
+  // (perdida de senal optica) y offline genuino son problemas reales.
+  const relevant = total - semEnergia - inativo - desabilitada;
+  const problemReal = loss + offline;
+  const pctOk = relevant > 0 ? ((relevant - problemReal) / relevant) * 100 : 100;
+
+  let statusDot = "dot-green";
+  if (pctOk < 70) statusDot = "dot-red";
+  else if (pctOk < 90) statusDot = "dot-yellow";
+
+  return `<div class="card">
+    <div class="card-head"><span class="card-title">${dot(statusDot)} ${name.replace(/^OLT-/, "")}</span></div>
+    <div class="row"><span>ONUs online</span><b>${online} / ${total} <span style="color:var(--muted)">(${pct.toFixed(1)}%)</span></b></div>
+    <div class="row"><span>LOSS (falla de fibra)</span><b>${loss}</b></div>
+    <div class="row" style="color:var(--muted)"><span>Sin energia</span><b>${semEnergia}</b></div>
+    <div class="row" style="color:var(--muted)"><span>Causa desconocida</span><b>${inativo + desabilitada}</b></div>
+    <div class="row"><span>Potencia critica (&le;-28dBm)</span><b style="${lowPower > 50 ? 'color:var(--yellow)' : ''}">${lowPower}</b></div>
+  </div>`;
+}
+
+function renderAntennaCard(name, byMetric) {
+  const reachable = byMetric.reachable && byMetric.reachable.value === 1;
+  const total = byMetric.devices_total ? byMetric.devices_total.value : 0;
+  const online = byMetric.devices_online ? byMetric.devices_online.value : 0;
+  const offline = byMetric.devices_offline ? byMetric.devices_offline.value : 0;
+  const lowSnr = byMetric.devices_low_snr ? byMetric.devices_low_snr.value : 0;
+  const pct = total > 0 ? (online / total) * 100 : 100;
+
+  let statusDot = !reachable ? "dot-red" : pct < 80 ? "dot-yellow" : "dot-green";
+
+  return `<div class="card">
+    <div class="card-head"><span class="card-title">${dot(statusDot)} ${name}</span></div>
+    ${!reachable ? '<div class="row"><span>Estado</span><b style="color:var(--red)">Sin respuesta API</b></div>' : `
+    <div class="row"><span>Online</span><b>${online} / ${total} <span style="color:var(--muted)">(${pct.toFixed(1)}%)</span></b></div>
+    <div class="row"><span>Offline</span><b>${offline}</b></div>
+    <div class="row"><span>SNR bajo (&lt;18dB)</span><b>${lowSnr}</b></div>`}
+  </div>`;
+}
+
+function renderNetonixCard(name, byMetric, hist) {
+  const reachable = byMetric.reachable && byMetric.reachable.value === 1;
+  const cpuTemp = byMetric.cpu_temp ? byMetric.cpu_temp.value : null;
+  const boardTemp = byMetric.board_temp ? byMetric.board_temp.value : null;
+  const uptime = byMetric.uptime_seconds ? byMetric.uptime_seconds.value : null;
+  const vin = byMetric.dcdc_input_voltage ? byMetric.dcdc_input_voltage.value : null;
+  const vout = byMetric.dcdc_output_voltage ? byMetric.dcdc_output_voltage.value : null;
+  const board48v = byMetric.board_48v ? byMetric.board_48v.value : null;
+  const board24v = byMetric.board_24v ? byMetric.board_24v.value : null;
+  const fansFailed = byMetric.fans_failed ? byMetric.fans_failed.value : 0;
+  const fansTotal = byMetric.fans_total ? byMetric.fans_total.value : 0;
+
+  // Falla sostenida: exige que las ultimas 3 lecturas (~6min) tengan el fan
+  // en 0 y la temperatura de board por encima de 40 - un ciclo normal de
+  // encendido/apagado no alcanza para marcarlo como falla real (Netonix
+  // cicla los fans on/off segun temperatura, eso es comportamiento normal).
+  const fanHist = (hist && hist.fan1_rpm) || [];
+  const tempHist = (hist && hist.board_temp) || [];
+  const lastFan = fanHist.slice(-3);
+  const lastTemp = tempHist.slice(-3);
+  const sustainedFanFail = lastFan.length >= 3 && lastFan.every(p => p.value === 0)
+    && lastTemp.length >= 3 && lastTemp.every(p => p.value > 40);
+
+  // Umbrales alineados con routers/SwOS (65 rojo / 55 amarillo): board_temp
+  // en 45-49C es rango normal de operacion en varios modelos, confirmar con
+  // el historico del propio equipo antes de bajar estos umbrales.
+  let statusDot = "dot-grey";
+  if (!reachable) statusDot = "dot-red";
+  else if (sustainedFanFail || (boardTemp != null && boardTemp > 65)) statusDot = "dot-red";
+  else if (boardTemp != null && boardTemp > 55) statusDot = "dot-yellow";
+  else statusDot = "dot-green";
+
+  const shortName = name.replace(/^Netonix-/, "");
+
+  if (!reachable) {
+    return `<div class="card">
+      <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
+      <div class="row"><span>Estado</span><b style="color:var(--red)">Sin respuesta</b></div>
+    </div>`;
+  }
+
+  return `<div class="card">
+    <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
+    <div class="row"><span>Temp. board</span><b>${boardTemp != null ? boardTemp + "C" : "-"}</b></div>
+    <div class="row"><span>Temp. CPU</span><b style="color:var(--muted)">${cpuTemp != null ? cpuTemp + "C" : "-"}</b></div>
+    ${(() => {
+      const fanText = sustainedFanFail ? `Falla de fan (${fansTotal - fansFailed}/${fansTotal})` : `${fansTotal - fansFailed}/${fansTotal} ok`;
+      return `<div class="row"><span>Fans</span><b style="${sustainedFanFail ? 'color:var(--red)' : ''}">${fanText}</b></div>`;
+    })()}
+    ${vin != null ? `<div class="row"><span>Voltaje DC in/out</span><b>${vin.toFixed(1)}V / ${vout.toFixed(1)}V</b></div>` : ""}
+    ${vin == null && board48v != null ? `<div class="row"><span>Voltaje 48V/24V</span><b>${board48v.toFixed(1)}V / ${board24v != null ? board24v.toFixed(1) : "-"}V</b></div>` : ""}
+    <div class="row"><span>Uptime</span><b>${fmtUptime(uptime)}</b></div>
+    ${ipLink(byMetric, "http")}
+  </div>`;
+}
+
+function renderEdgeSwitchCard(name, byMetric) {
+  const reachable = byMetric.reachable && byMetric.reachable.value === 1;
+  const cpu = byMetric.cpu_usage ? byMetric.cpu_usage.value : null;
+  const ram = byMetric.ram_usage ? byMetric.ram_usage.value : null;
+  const uptime = byMetric.uptime_seconds ? byMetric.uptime_seconds.value : null;
+  const portsWithErrors = byMetric.ports_with_errors ? byMetric.ports_with_errors.value : 0;
+  const shortName = name.replace(/^EdgeSwitch-/, "");
+
+  // Sin sensor de temperatura en estos modelos - el color se basa en si algun
+  // puerto tiene errores/paquetes descartados reales, no en CPU/RAM.
+  let statusDot = "dot-grey";
+  if (!reachable) statusDot = "dot-red";
+  else if (portsWithErrors > 0) statusDot = "dot-yellow";
+  else statusDot = "dot-green";
+
+  if (!reachable) {
+    return `<div class="card">
+      <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
+      <div class="row"><span>Estado</span><b style="color:var(--red)">Sin respuesta</b></div>
+    </div>`;
+  }
+
+  return `<div class="card">
+    <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
+    <div class="row"><span>CPU</span><b>${cpu != null ? cpu + "%" : "-"}</b></div>
+    <div class="row"><span>RAM</span><b>${ram != null ? ram + "%" : "-"}</b></div>
+    <div class="row"><span>Puertos con errores</span><b style="${portsWithErrors > 0 ? 'color:var(--yellow)' : ''}">${portsWithErrors}</b></div>
+    <div class="row"><span>Uptime</span><b>${fmtUptime(uptime)}</b></div>
+    ${ipLink(byMetric, "https")}
+  </div>`;
+}
+
+function renderSwosCard(name, byMetric) {
+  const reachable = byMetric.reachable && byMetric.reachable.value === 1;
+  const temp = byMetric.temp ? byMetric.temp.value : null;
+  const uptime = byMetric.uptime_seconds ? byMetric.uptime_seconds.value : null;
+  const shortName = name.replace(/^SwOS-/, "");
+
+  const fans = [1, 2, 3, 4].map(i => byMetric[`fan${i}_rpm`] ? byMetric[`fan${i}_rpm`].value : null).filter(v => v !== null);
+  const fansRunning = fans.filter(v => v > 0).length;
+  const psu1State = byMetric.psu1_state ? byMetric.psu1_state.text_value : null;
+  const psu2State = byMetric.psu2_state ? byMetric.psu2_state.text_value : null;
+  const psu1V = byMetric.psu1_voltage ? byMetric.psu1_voltage.value : null;
+  const psu2V = byMetric.psu2_voltage ? byMetric.psu2_voltage.value : null;
+  const psuFail = (psu1State && psu1State !== "ok") || (psu2State && psu2State !== "ok");
+
+  let statusDot = "dot-grey";
+  if (!reachable) statusDot = "dot-red";
+  else if (psuFail || (temp != null && temp > 65)) statusDot = "dot-red";
+  else if (temp != null && temp > 55) statusDot = "dot-yellow";
+  else statusDot = "dot-green";
+
+  if (!reachable) {
+    return `<div class="card">
+      <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
+      <div class="row"><span>Estado</span><b style="color:var(--red)">Sin respuesta</b></div>
+    </div>`;
+  }
+
+  return `<div class="card">
+    <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
+    <div class="row"><span>Temperatura</span><b>${temp != null ? temp + "C" : "-"}</b></div>
+    <div class="row"><span>Fans</span><b>${fansRunning}/${fans.length} girando</b></div>
+    ${psu1State ? `<div class="row"><span>PSU1</span><b style="${psu1State !== 'ok' ? 'color:var(--red)' : ''}">${psu1State}${psu1V != null ? ' (' + psu1V.toFixed(1) + 'V)' : ''}</b></div>` : ""}
+    ${psu2State ? `<div class="row"><span>PSU2</span><b style="${psu2State !== 'ok' ? 'color:var(--red)' : ''}">${psu2State}${psu2V != null ? ' (' + psu2V.toFixed(1) + 'V)' : ''}</b></div>` : ""}
+    <div class="row"><span>Uptime</span><b>${fmtUptime(uptime)}</b></div>
+    ${ipLink(byMetric, "http")}
+  </div>`;
+}
+
+async function refresh() {
+  const res = await fetch("api/state");
+  const data = await res.json();
+  const freshEl = document.getElementById("freshness");
+
+  if (!data.ts) {
+    freshEl.className = "freshness fresh-stale";
+    freshEl.textContent = "Sin datos todavia - el poller no corrio aun.";
+    return;
+  }
+
+  const ageSec = data.server_now - data.ts;
+  let errors = [];
+  try { errors = JSON.parse((data.last_run && data.last_run.errors) || "[]"); } catch (e) {}
+  const stale = ageSec >= 300;
+  freshEl.className = "freshness " + (stale || errors.length ? "fresh-stale" : "fresh-ok");
+  let freshText = `Ultima lectura hace ${fmtAgo(ageSec)}`;
+  if (stale) freshText += " - el poller podria estar detenido";
+  if (errors.length) freshText += ` - ${errors.length} error(es) en la ultima corrida: ${errors.join(" | ")}`;
+  freshEl.textContent = freshText;
+
+  const byEntity = {};
+  for (const r of data.readings) {
+    byEntity[r.entity] = byEntity[r.entity] || {};
+    byEntity[r.entity][r.metric] = r;
+  }
+
+  let routersHtml = "";
+  for (const r of ROUTERS) {
+    const byMetric = byEntity[r.name] || {};
+    let historyByUplink = {};
+    if (r.uplinks && r.uplinks.length && byMetric.reachable && byMetric.reachable.value === 1) {
+      for (const up of r.uplinks) {
+        historyByUplink[up.key] = await loadHistory(r.name, [`${up.key}_fcs`, `${up.key}_rxpkt`], 6);
+      }
+    }
+    routersHtml += renderRouterCard(r.name, byMetric, r.uplinks || [], historyByUplink, r.psu_style);
+  }
+  document.getElementById("routers").innerHTML = routersHtml || '<div class="empty-note">Sin routers configurados.</div>';
+
+  let oltsHtml = "";
+  for (const entity in byEntity) {
+    if (entity.startsWith("OLT-")) oltsHtml += renderOltCard(entity, byEntity[entity]);
+  }
+  document.getElementById("olts").innerHTML = oltsHtml || '<div class="empty-note">Sin datos de OLTs todavia.</div>';
+
+  let antHtml = "";
+  for (const entity in byEntity) {
+    if (entity.startsWith("AirControl-")) antHtml += renderAntennaCard(entity, byEntity[entity]);
+  }
+  document.getElementById("antennas").innerHTML = antHtml || '<div class="empty-note">Sin datos de AirControl todavia.</div>';
+
+  let netonixHtml = "";
+  for (const entity in byEntity) {
+    if (entity.startsWith("Netonix-")) {
+      const hist = await loadHistory(entity, ["fan1_rpm", "board_temp"], 0.25);
+      netonixHtml += renderNetonixCard(entity, byEntity[entity], hist);
+    }
+  }
+  document.getElementById("netonix").innerHTML = netonixHtml || '<div class="empty-note">Sin datos de Netonix todavia.</div>';
+
+  let edgeHtml = "";
+  for (const entity in byEntity) {
+    if (entity.startsWith("EdgeSwitch-")) edgeHtml += renderEdgeSwitchCard(entity, byEntity[entity]);
+    if (entity.startsWith("SwOS-")) edgeHtml += renderSwosCard(entity, byEntity[entity]);
+  }
+  document.getElementById("edgeswitches").innerHTML = edgeHtml || '<div class="empty-note">Sin datos todavia.</div>';
+}
+
+async function init() {
+  try {
+    const cfgRes = await fetch("api/config");
+    const cfg = await cfgRes.json();
+    ROUTERS = cfg.routers || [];
+  } catch (e) {
+    console.error("no se pudo cargar /api/config", e);
+  }
+  refresh();
+  setInterval(refresh, 30000);
+}
+
+init();
+</script>
+</body>
+</html>

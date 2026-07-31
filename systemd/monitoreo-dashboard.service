@@ -1,0 +1,16 @@
+[Unit]
+Description=Dashboard web de monitoreo de red ISP (Flask)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/monitoreo/src
+Environment=MONITOREO_CONFIG=/opt/monitoreo/config.yaml
+ExecStart=/opt/monitoreo/venv/bin/python3 /opt/monitoreo/src/app.py
+Restart=always
+RestartSec=5
+User=monitoreo-svc
+Group=monitoreo-svc
+
+[Install]
+WantedBy=multi-user.target

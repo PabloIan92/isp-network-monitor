@@ -1,0 +1,90 @@
+# Copia este archivo a config.yaml y completa con los datos reales de tu red.
+# config.yaml NUNCA se sube al repo (esta en .gitignore) porque tiene credenciales.
+
+db_path: /opt/monitoreo/data/monitoreo.db
+retention_days: 7
+poll_interval_seconds: 120
+session_max_age_seconds: 600   # cuanto se reutiliza una sesion/token antes de renovarla
+
+thresholds:
+  low_power_dbm: -28.0      # potencia optica ONU considerada critica
+  low_snr_db: 18.0          # SNR de antena considerado bajo
+  fan_fail_rpm: 100         # por debajo de esto, un fan se considera parado
+
+# ---------------------------------------------------------------------------
+# Routers Mikrotik (RouterOS), accedidos por SSH con una cuenta de solo lectura
+# (grupo "read"), NUNCA con la cuenta admin. Ver docs/mikrotik.md.
+# ---------------------------------------------------------------------------
+routers:
+  - name: "Router-Core"
+    host: "192.0.2.1"
+    port: 22
+    user: "monitoreo"
+    password: "CHANGE_ME"
+    ros_major: 7              # 6 o 7 - cambia el formato de "/system health get"
+    psu_style: psu_voltage    # simple_voltage | psu_voltage | psu_state | none
+    uplinks:
+      - key: "sfp1"
+        match: "sfp1"         # substring del nombre de interfaz en RouterOS
+        label: "sfp1 - Uplink Principal"
+
+  - name: "Router-Distribucion-1"
+    host: "192.0.2.2"
+    port: 22
+    user: "monitoreo"
+    password: "CHANGE_ME"
+    ros_major: 7
+    psu_style: simple_voltage
+    uplinks: []
+
+# ---------------------------------------------------------------------------
+# Ubiquiti AirControl (gestion de antenas/radioenlaces). Una entrada por
+# instancia/servidor AirControl. Ver docs/aircontrol.md.
+# ---------------------------------------------------------------------------
+aircontrol_instances:
+  - name: "AirControl-Clientes"
+    host: "192.0.2.10"
+    user: "admin"
+    password: "CHANGE_ME"
+
+# ---------------------------------------------------------------------------
+# Switches Netonix. "scheme" es http o https segun como tengas configurado
+# el switch (algunos redirigen a https). Ver docs/netonix.md.
+# ---------------------------------------------------------------------------
+netonix_switches:
+  - name: "Netonix-Sitio1"
+    host: "192.0.2.20"
+    user: "admin"
+    password: "CHANGE_ME"
+    scheme: http
+
+# ---------------------------------------------------------------------------
+# Switches Ubiquiti EdgeSwitch. Ver docs/edgeswitch.md.
+# ---------------------------------------------------------------------------
+edgeswitches:
+  - name: "EdgeSwitch-1"
+    host: "192.0.2.30"
+    user: "admin"
+    password: "CHANGE_ME"
+
+# ---------------------------------------------------------------------------
+# Switches MikroTik con SwOS (no RouterOS). "fan_slots" indica que indices de
+# fan crudos (fan1..fan4 en la API) corresponden a fans reales en esta placa -
+# verificar contra la UI del equipo, algunos modelos tienen slots fantasma.
+# Ver docs/swos.md.
+# ---------------------------------------------------------------------------
+swos_switches:
+  - name: "SwOS-1"
+    host: "192.0.2.40"
+    user: "admin"
+    password: "CHANGE_ME"
+    fan_slots: [1, 2, 3, 4]
+
+# ---------------------------------------------------------------------------
+# OLTCloud (gestion centralizada de OLTs GPON). Omitir esta seccion (o dejar
+# base_url vacio) si no usas esta plataforma. Ver docs/oltcloud.md.
+# ---------------------------------------------------------------------------
+oltcloud:
+  base_url: "https://tu-instancia.oltcloud.co"
+  user: "CHANGE_ME"
+  password: "CHANGE_ME"
