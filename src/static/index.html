@@ -288,14 +288,15 @@ function renderEdgeSwitchCard(name, byMetric, hist) {
   const cpu = byMetric.cpu_usage ? byMetric.cpu_usage.value : null;
   const ram = byMetric.ram_usage ? byMetric.ram_usage.value : null;
   const uptime = byMetric.uptime_seconds ? byMetric.uptime_seconds.value : null;
-  const portsWithErrors = byMetric.ports_with_errors ? byMetric.ports_with_errors.value : 0;
   const shortName = name.replace(/^EdgeSwitch-/, "");
 
   // Un contador crudo de errores > 0 siempre termina disparando tarde o
   // temprano en un puerto con trafico real (ej. 1 error sobre 143 millones
   // de paquetes es ruido, no una falla) - igual que con los uplinks Mikrotik,
   // usamos tasa (errores/paquetes en la ventana) en vez del contador absoluto.
+  // Se muestra Si/No en vez del numero crudo para no confundir al personal.
   const rate = errorRate(hist || {}, "total_port_errors", "total_port_packets");
+  const hasErrors = rate != null && rate > 1e-6;
 
   // Sin sensor de temperatura en estos modelos - el color se basa en la tasa
   // de errores de puerto, no en CPU/RAM.
@@ -316,7 +317,7 @@ function renderEdgeSwitchCard(name, byMetric, hist) {
     <div class="card-head"><span class="card-title">${dot(statusDot)} ${shortName}</span></div>
     <div class="row"><span>CPU</span><b>${cpu != null ? cpu + "%" : "-"}</b></div>
     <div class="row"><span>RAM</span><b>${ram != null ? ram + "%" : "-"}</b></div>
-    <div class="row"><span>Puertos con errores (contador)</span><b style="color:var(--muted)">${portsWithErrors}</b></div>
+    <div class="row"><span>Errores de puerto</span><b style="${hasErrors ? 'color:var(--yellow)' : ''}">${hasErrors ? "Si" : "No"}</b></div>
     <div class="row"><span>Uptime</span><b>${fmtUptime(uptime)}</b></div>
     ${ipLink(byMetric, "https")}
   </div>`;
