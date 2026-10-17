@@ -16,6 +16,14 @@ A unified network telemetry daemon and real-time web dashboard for multi-vendor 
 
 ---
 
+## 🛡️ Project Ownership & Data Privacy
+
+- **Sole Personal Ownership:** This is an independent open-source personal project and homelab reference architecture authored solely by Pablo Ian Laurino. It is not affiliated with, commissioned by, or derived from any employer, client, startup, or institutional work. All code is independently developed and published under the [MIT License](LICENSE).
+- **Zero Subscriber Data / No PII:** The system collects strictly physical device-level telemetry (CPU load, temperatures, PSU voltages, fan RPMs, optical power levels, interface error counters). It does not collect, store, or process any subscriber names, personal information, or customer traffic.
+- **Isolated Synthetic Demo:** All examples and tests use synthetic topology with RFC 5737 documentation IP ranges (`192.0.2.0/24`) and dummy placeholders. No real network credentials or configurations are stored in this repository.
+
+---
+
 ## ⚡ Quickstart (Synthetic Demo Mode)
 
 Run the dashboard immediately with mock lab topology and metrics — **no physical hardware or database setup required**:

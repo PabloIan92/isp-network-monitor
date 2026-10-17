@@ -9,6 +9,16 @@ Un dashboard unificado y motor de telemetría open source para monitorear infrae
 
 No es un producto genérico empaquetado — es una referencia funcional y desacoplada con documentación técnica de cómo interactuar con cada plataforma (auth, endpoints, sesiones persistentes y manejo de telemetría), pensado para adaptar a cualquier topología de red.
 
+---
+
+## 🛡️ Titularidad del Proyecto y Privacidad de Datos
+
+- **Propiedad Personal Exclusiva:** Este es un proyecto personal open source independiente y arquitectura de referencia para homelab/laboratorio, desarrollado y mantenido exclusivamente por Pablo Ian Laurino. No está afiliado, comisionado ni derivado de ningún empleador, cliente, startup o institución. Todo el código es de autoría independiente y se distribuye bajo la licencia [MIT](LICENSE).
+- **Cero Datos de Abonados / Sin PII:** El sistema recopila estrictamente telemetría física a nivel de dispositivo (carga de CPU, temperaturas, voltajes de PSU, RPMs de ventiladores, niveles de potencia óptica y contadores de error de interfaces). No almacena ni procesa nombres, datos personales de clientes ni tráfico de usuarios.
+- **Modo Demo Sintético Aislado:** Todos los ejemplos y pruebas utilizan topología sintética con rangos IP de documentación RFC 5737 (`192.0.2.0/24`) y valores ficticios. No se almacenan credenciales ni configuraciones reales en este repositorio.
+
+---
+
 ## Demostración local (Modo Demo)
 
 El proyecto incluye un modo demo con topología y métricas sintéticas de laboratorio. No abre conexiones externas, no requiere hardware físico ni carga credenciales reales. Permite ejecutar y desarrollar sobre el dashboard y su API con datos simulados de forma inmediata:
