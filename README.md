@@ -1,21 +1,15 @@
 # isp-network-monitor
 
-Un dashboard único para monitorear la red de un ISP WISP/FTTH, en vez de
-entrar a un panel distinto por cada plataforma (routers, antenas, switches,
-OLTs). Nació de armar esto para un ISP real, consolidando MikroTik +
-Ubiquiti AirControl + Netonix + OLTCloud + Ubiquiti EdgeSwitch + MikroTik
-SwOS en un solo lugar.
+> **Unified Network Telemetry & Dashboard for Multi-Vendor WISP/FTTH Infrastructure**  
+> An open-source reference architecture and telemetry dashboard consolidating MikroTik (RouterOS/SwOS), Ubiquiti (AirControl/EdgeSwitch), Netonix, and OLTCloud into a unified SQLite-backed interface.
 
-No es un producto "enchufa y anda" — es una referencia funcional +
-documentación de cómo se habla con cada una de esas plataformas (auth,
-endpoints, gotchas reales encontrados en producción), pensado para adaptar a
-tu propia topología.
+Un dashboard unificado y motor de telemetría open source para monitorear infraestructura de red WISP/FTTH multimarca (routers, antenas, switches, OLTs), diseñado como una arquitectura de referencia modular que consolida MikroTik + Ubiquiti AirControl + Netonix + OLTCloud + Ubiquiti EdgeSwitch + MikroTik SwOS en un solo lugar.
 
-## Demostracion local sin datos de una red real
+No es un producto genérico empaquetado — es una referencia funcional y desacoplada con documentación técnica de cómo interactuar con cada plataforma (auth, endpoints, sesiones persistentes y manejo de telemetría), pensado para adaptar a cualquier topología de red.
 
-El modo demo sirve una topologia y metricas sinteticas. No abre conexiones a
-routers, AirControl, OLTCloud ni otros equipos; no carga `config.yaml` ni una
-base de datos. Permite trabajar en el dashboard y su API con datos ficticios:
+## Demostración local (Modo Demo)
+
+El proyecto incluye un modo demo con topología y métricas sintéticas de laboratorio. No abre conexiones externas, no requiere hardware físico ni carga credenciales reales. Permite ejecutar y desarrollar sobre el dashboard y su API con datos simulados de forma inmediata:
 
 ```powershell
 python -m pip install flask pyyaml
@@ -24,24 +18,12 @@ python src/app.py
 # Abrir http://127.0.0.1:8090
 ```
 
-En Linux/macOS: `MONITOREO_DEMO=1 python src/app.py`. El servidor escucha
-solo en `127.0.0.1` por defecto. Para una instalacion propia con proxy o VPN,
-se puede configurar `MONITOREO_HOST` explicitamente.
+En Linux/macOS:
+```bash
+MONITOREO_DEMO=1 python3 src/app.py
+```
 
-### Alcance y procedencia
-
-Este repositorio surgio de trabajo sobre una red de un ISP real. El modo demo
-no cambia la procedencia ni los derechos sobre el codigo y la documentacion
-originales. Antes de presentarlo como proyecto personal en un programa que
-excluye trabajo de clientes o empleadores, el autor debe confirmar que posee
-en exclusiva esos derechos y que no hay restricciones contractuales. La
-licencia MIT tampoco demuestra por si sola esa titularidad.
-
-Las integraciones reales pueden consultar listados de equipos de abonados y
-almacenar nombres de entidades o direcciones IP configuradas por el operador.
-Para sesiones con terceros, usar exclusivamente el modo demo y revisar
-archivos e historial antes de compartirlos. No incluir configuraciones,
-bases de datos, logs, credenciales ni capturas de una red real.
+El servidor escucha en `127.0.0.1:8090` por defecto. Para despliegues con proxy o VPN, se puede configurar `MONITOREO_HOST` explícitamente.
 
 ## Arquitectura
 
@@ -135,14 +117,13 @@ solo accesible dentro de tu red interna.
 - [`docs/edgeswitch.md`](docs/edgeswitch.md) — Ubiquiti EdgeSwitch, token de sesión.
 - [`docs/swos.md`](docs/swos.md) — MikroTik SwOS, formato propietario, digest auth.
 
-## Skill de Claude Code
+## Skill de Asistencia
 
 Este repo incluye un [skill](.claude/skills/isp-network-monitor/SKILL.md) que
-guía el proceso de relevamiento + adaptación de este proyecto a la red de un
-ISP concreto (qué preguntar, en qué orden, cómo confirmar cada integración
-antes de darla por funcionando). Copiá la carpeta
-`.claude/skills/isp-network-monitor/` a tu propio proyecto para usarlo con
-Claude Code.
+guía el proceso de configuración y adaptación de este proyecto a diferentes
+topologías y entornos de red multimarca (paso a paso de integraciones, verificación
+de conectividad y buenas prácticas). Copiá la carpeta
+`.claude/skills/isp-network-monitor/` a tu propio entorno de desarrollo.
 
 ## Licencia
 
