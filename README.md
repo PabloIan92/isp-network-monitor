@@ -11,6 +11,38 @@ documentación de cómo se habla con cada una de esas plataformas (auth,
 endpoints, gotchas reales encontrados en producción), pensado para adaptar a
 tu propia topología.
 
+## Demostracion local sin datos de una red real
+
+El modo demo sirve una topologia y metricas sinteticas. No abre conexiones a
+routers, AirControl, OLTCloud ni otros equipos; no carga `config.yaml` ni una
+base de datos. Permite trabajar en el dashboard y su API con datos ficticios:
+
+```powershell
+python -m pip install flask pyyaml
+$env:MONITOREO_DEMO = "1"
+python src/app.py
+# Abrir http://127.0.0.1:8090
+```
+
+En Linux/macOS: `MONITOREO_DEMO=1 python src/app.py`. El servidor escucha
+solo en `127.0.0.1` por defecto. Para una instalacion propia con proxy o VPN,
+se puede configurar `MONITOREO_HOST` explicitamente.
+
+### Alcance y procedencia
+
+Este repositorio surgio de trabajo sobre una red de un ISP real. El modo demo
+no cambia la procedencia ni los derechos sobre el codigo y la documentacion
+originales. Antes de presentarlo como proyecto personal en un programa que
+excluye trabajo de clientes o empleadores, el autor debe confirmar que posee
+en exclusiva esos derechos y que no hay restricciones contractuales. La
+licencia MIT tampoco demuestra por si sola esa titularidad.
+
+Las integraciones reales pueden consultar listados de equipos de abonados y
+almacenar nombres de entidades o direcciones IP configuradas por el operador.
+Para sesiones con terceros, usar exclusivamente el modo demo y revisar
+archivos e historial antes de compartirlos. No incluir configuraciones,
+bases de datos, logs, credenciales ni capturas de una red real.
+
 ## Arquitectura
 
 ```
