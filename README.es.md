@@ -1,142 +1,158 @@
 # isp-network-monitor
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 
-> **[English](README.md) | [Español](README.es.md)**
+Un dashboard de monitoreo de red y demonio de recolección liviano, diseñado para infraestructura WISP (enlaces inalámbricos) y FTTH (fibra óptica).
 
-Un dashboard unificado y motor de telemetría open source para monitorear infraestructura de red WISP/FTTH multimarca (routers, antenas, switches, OLTs), diseñado como una arquitectura de referencia modular que consolida MikroTik + Ubiquiti AirControl + Netonix + OLTCloud + Ubiquiti EdgeSwitch + MikroTik SwOS en un solo lugar.
+En vez de tener abiertas cinco pestañas distintas para revisar routers MikroTik, radioenlaces Ubiquiti, switches de torre Netonix, EdgeSwitches, equipos SwOS y OLTs GPON, este proyecto unifica la telemetría física y de salud en un panel único que se refresca solo.
 
-No es un producto genérico empaquetado — es una referencia funcional y desacoplada con documentación técnica de cómo interactuar con cada plataforma (auth, endpoints, sesiones persistentes y manejo de telemetría), pensado para adaptar a cualquier topología de red.
-
----
-
-## 🛡️ Titularidad del Proyecto y Privacidad de Datos
-
-- **Propiedad Personal Exclusiva:** Este es un proyecto personal open source independiente y arquitectura de referencia para homelab/laboratorio, desarrollado y mantenido exclusivamente por Pablo Ian Laurino. No está afiliado, comisionado ni derivado de ningún empleador, cliente, startup o institución. Todo el código es de autoría independiente y se distribuye bajo la licencia [MIT](LICENSE).
-- **Cero Datos de Abonados / Sin PII:** El sistema recopila estrictamente telemetría física a nivel de dispositivo (carga de CPU, temperaturas, voltajes de PSU, RPMs de ventiladores, niveles de potencia óptica y contadores de error de interfaces). No almacena ni procesa nombres, datos personales de clientes ni tráfico de usuarios.
-- **Modo Demo Sintético Aislado:** Todos los ejemplos y pruebas utilizan topología sintética con rangos IP de documentación RFC 5737 (`192.0.2.0/24`) y valores ficticios. No se almacenan credenciales ni configuraciones reales en este repositorio.
+> **Nota**: Documentación en inglés disponible en [English README](README.md).
 
 ---
 
-## Demostración local (Modo Demo)
+## El problema que resuelve
 
-El proyecto incluye un modo demo con topología y métricas sintéticas de laboratorio. No abre conexiones externas, no requiere hardware físico ni carga credenciales reales. Permite ejecutar y desarrollar sobre el dashboard y su API con datos simulados de forma inmediata:
+Quien administra una red mixta sabe lo molesto que es lidiar con paneles separados:
+- **MikroTik RouterOS**: Winbox o comandos por SSH.
+- **Ubiquiti AirMax / LTU**: AirControl o UISP.
+- **Switches Netonix**: Web propietaria en switches de torre.
+- **Ubiquiti EdgeSwitch y MikroTik SwOS**: Consolas web con sus propios esquemas de autenticación.
+- **OLTs GPON (ej. OLTCloud)**: Portales web con estados de ONUs y niveles ópticos.
 
-```powershell
-python -m pip install flask pyyaml
-$env:MONITOREO_DEMO = "1"
-python src/app.py
-# Abrir http://127.0.0.1:8090
-```
+Cuando una torre se queda sin 220V, una batería baja de 24V o un enlace pierde señal por clima, entrar a cinco sistemas distintos para saber qué pasó quita demasiado tiempo.
 
-En Linux/macOS:
-```bash
-MONITOREO_DEMO=1 python3 src/app.py
-```
+`isp-network-monitor` corre un único proceso en Python que consulta la salud física de los equipos (voltajes, temperaturas, RPM de coolers, potencia óptica de recepción, SNR inalámbrico, contadores de error en puertos) y guarda las lecturas en SQLite. Un backend minimalista en Flask sirve el dashboard oscuro en JS vanilla, sin pasos de compilación ni dependencias pesadas.
 
-El servidor escucha en `127.0.0.1:8090` por defecto. Para despliegues con proxy o VPN, se puede configurar `MONITOREO_HOST` explícitamente.
+---
 
 ## Arquitectura
 
 ```
-                    ┌─────────────────────┐
-   MikroTik (SSH) ──┤                     │
-   AirControl (API)─┤                     │      SQLite       ┌──────────┐
-   Netonix (API) ───┤  poller_daemon.py   │──── (readings) ───┤  app.py  │──── dashboard web
-   EdgeSwitch (API)─┤  (systemd, corre    │                    │ (Flask)  │     (auto-refresh 30s)
-   SwOS (API) ──────┤   cada N segundos)  │                    └──────────┘
-   OLTCloud (API) ──┤                     │
-                    └─────────────────────┘
+                    ┌────────────────────────┐
+   MikroTik (SSH) ──┤                        │
+   AirControl (API)─┤                        │      SQLite       ┌────────────┐
+   Netonix (API) ───┤   poller_daemon.py     │──── (readings) ───┤   app.py   │──── Dashboard Web
+   EdgeSwitch (API)─┤   (servicio de fondo   │    [modo WAL]     │  (Flask)   │     (auto-refresco 30s)
+   SwOS (API) ──────┤    en systemd)         │                   └────────────┘
+   OLTCloud (API) ──┤                        │
+                    └────────────────────────┘
 ```
 
-- **`poller_daemon.py`**: un solo proceso persistente (no cron) que consulta
-  cada plataforma cada `poll_interval_seconds` y guarda lecturas en SQLite
-  (tabla `readings`, esquema `ts, entity, metric, value, text_value`).
-  Reusa conexiones/sesiones entre ciclos (SSH persistente, cookies de sesión,
-  tokens) para no generar ruido de "login" constante en los logs de los
-  equipos.
-- **`app.py`**: Flask, sirve el dashboard estático y tres endpoints JSON:
-  `/api/state` (última lectura de todo), `/api/history` (histórico de una
-  métrica puntual, para gráficos/tendencia), `/api/config` (topología sin
-  credenciales, para que el frontend sepa qué tarjetas dibujar).
-- **`src/static/index.html`**: dashboard de una sola página, sin build step
-  (JS vanilla), con semáforo verde/amarillo/rojo por equipo.
+- **`poller_daemon.py`**: Proceso persistente (en systemd). Mantiene abiertas las sesiones SSH y reutiliza tokens HTTP entre ciclos para no llenar los logs de auditoría de los equipos con inicios de sesión constantes.
+- **SQLite (Modo WAL)**: Almacenamiento rápido y sin mantenimiento externo. Usa dos tablas (`readings` y `poller_runs`) con índices compuestos para consultas de estado e histórico.
+- **`app.py`**: Servicio Flask ligero con tres endpoints de solo lectura:
+  - `/api/config`: Topología sanitizada (nombres de equipos, fuentes de poder, enlaces) sin contraseñas ni secretos.
+  - `/api/state`: Últimas lecturas registradas para todos los equipos.
+  - `/api/history`: Series temporales para gráficos de tendencia.
+- **`src/static/index.html`**: Dashboard en HTML/CSS/JS vanilla. Sin Node.js ni build step, con carga instantánea y semáforo visual (verde / amarillo / rojo).
 
-## Por qué SQLite + polling en vez de SNMP/Zabbix/LibreNMS
+---
 
-Todas las plataformas de este README exponen HTTP/SSH pero **no
-necesariamente SNMP útil** (o el soporte es parcial/inconsistente entre
-modelos). Este proyecto prioriza "andar rápido con lo que ya tenés acceso"
-sobre una plataforma de monitoreo genérica. Si tu red sí tiene buen soporte
-SNMP en todo el parque, considerá LibreNMS/Zabbix en su lugar — este
-proyecto sigue siendo útil como referencia de cómo autenticarse a cada
-plataforma propietaria.
+## ¿Por qué SQLite y polling directo en vez de Zabbix o SNMP?
 
-## Instalación
+Si en tu red contás con soporte SNMP completo y homogéneo en el 100% de tus equipos y ya tenés un cluster de Zabbix o LibreNMS andando, conviene mantenerlo.
+
+Sin embargo, en despliegues reales de campo:
+1. Varios equipos de torre (como ciertas versiones de SwOS o Netonix) tienen implementaciones SNMP incompletas, lentas o con bugs en sus MIBs.
+2. Hacer consultas SNMP pesadas a través de enlaces inalámbricos saturados suele provocar pérdida de paquetes UDP y timeouts.
+3. Métricas críticas como voltajes de doble fuente redundante o diagnósticos ópticos SFP (DDM) suelen obtenerse de forma mucho más directa y rápida consultando la API o la consola del equipo.
+
+Este proyecto fue pensado para ser 100% autocontenido. No necesita bases de datos externas (ni MySQL, ni Postgres, ni InfluxDB, ni Redis), corre sin problemas en un VPS chico o en una Raspberry Pi, y completa el ciclo de recolección en menos de 3 segundos.
+
+---
+
+## Inicio rápido y Modo Demo
+
+Podés probar el dashboard localmente en segundos con datos sintéticos, sin necesidad de hardware físico:
 
 ```bash
+# 1. Clonar el repositorio
+git clone https://github.com/PabloIan92/isp-network-monitor.git
+cd isp-network-monitor
+
+# 2. Configurar entorno virtual
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate   # En Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
 
-cp config.example.yaml config.yaml
-$EDITOR config.yaml   # completar hosts/credenciales reales - ver docs/
+# 3. Iniciar modo demo interactivo
+python3 src/demo.py
+```
 
-# Probar en foreground antes de instalar como servicio:
+Abrí `http://localhost:8090` en tu navegador. Vas a ver el dashboard funcionando con métricas sintéticas realistas (voltajes de fuentes redundantes, potencias ópticas, enlaces y temperaturas).
+
+### Ejecutar Pruebas Automatizadas
+
+El proyecto incluye tests unitarios que validan las respuestas de la API, la sanitización de secretos y la serialización del estado:
+
+```bash
+python3 -m unittest discover tests
+```
+
+---
+
+## Despliegue en Producción
+
+### 1. Configuración
+
+Copiá el archivo de ejemplo y completá las direcciones de tus equipos y credenciales de solo lectura:
+
+```bash
+cp config.example.yaml config.yaml
+chmod 600 config.yaml
+$EDITOR config.yaml
+```
+
+> **Buenas prácticas**: Creá siempre usuarios dedicados con permisos de solo lectura (por ejemplo, grupo `read` en MikroTik) para el monitoreo. Nunca uses usuarios con permisos de escritura.
+
+### 2. Prueba en primer plano
+
+Verificá la conectividad y las lecturas antes de crear los servicios del sistema:
+
+```bash
+# Probar el recolector
 MONITOREO_CONFIG=$(pwd)/config.yaml python3 src/poller_daemon.py
+
+# Probar el servidor web
 MONITOREO_CONFIG=$(pwd)/config.yaml python3 src/app.py
 ```
 
-`config.yaml` está en `.gitignore` — nunca se commitea, tiene credenciales.
+### 3. Instalar como servicios de systemd
 
-### Como servicio (systemd)
-
-Copiá `systemd/*.service` a `/etc/systemd/system/`, ajustá los paths si no
-usás `/opt/monitoreo`, y:
+Los archivos de unidad se encuentran en la carpeta `systemd/`:
 
 ```bash
+sudo cp systemd/*.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now monitoreo-poller.service monitoreo-dashboard.service
 ```
 
-Corré el poller y el dashboard con un usuario de servicio dedicado (sin
-privilegios de más), no como root.
+Podés verificar el estado con `systemctl status monitoreo-poller`.
 
-### Exponer el dashboard
+---
 
-El dashboard escucha en `0.0.0.0:8090` sin autenticación propia — no lo
-expongas directo a Internet. Opciones simples: un túnel/VPN existente
-(Tailscale Funnel, WireGuard), un reverse proxy con auth básica, o dejarlo
-solo accesible dentro de tu red interna.
+## Seguridad y Acceso
 
-## Qué falta / lo dejamos afuera a propósito
+- **Red privada únicamente**: El dashboard escucha en el puerto `8090` sin autenticación integrada. Mantenelo accesible exclusivamente mediante una VPN segura de gestión (WireGuard, Tailscale) o detrás de un reverse proxy (Caddy / Nginx) con autenticación básica y HTTPS.
+- **Recolección de solo lectura**: El demonio únicamente consulta telemetría de estado. En ningún momento ejecuta modificaciones de configuración ni escrituras en los equipos.
+- **Privacidad por diseño**: El sistema monitorea variables físicas del equipamiento (voltajes, temperaturas, errores de paquetes, potencias ópticas, SNR). **No** inspecciona tráfico de usuarios ni almacena datos personales de clientes (cero PII).
 
-- **Sin autenticación en el dashboard.** Agregala vos según tu entorno (proxy
-  con basic auth, o Flask-Login si necesitás usuarios).
-- **Sin alertas push (Telegram/Slack/etc).** El dashboard es pull (lo mirás
-  vos); si querés alertas activas, es un cron/script aparte que lea la misma
-  SQLite y dispare un webhook cuando algo cruce el umbral.
-- **Sin autodescubrimiento de equipos.** La topología es la que pongas en
-  `config.yaml` a mano.
+---
 
-## Documentación por plataforma
+## Documentación por Plataforma
 
-- [`docs/mikrotik.md`](docs/mikrotik.md) — RouterOS por SSH, v6 vs v7, PSU/voltaje, firewall.
-- [`docs/aircontrol.md`](docs/aircontrol.md) — Ubiquiti AirControl, login, reglas de auto-reboot.
-- [`docs/netonix.md`](docs/netonix.md) — login por form POST, telemetría, umbrales de fan/temp.
-- [`docs/oltcloud.md`](docs/oltcloud.md) — estados de ONU (online/sin energía/loss/etc), potencia óptica.
-- [`docs/edgeswitch.md`](docs/edgeswitch.md) — Ubiquiti EdgeSwitch, token de sesión.
-- [`docs/swos.md`](docs/swos.md) — MikroTik SwOS, formato propietario, digest auth.
+Detalles técnicos, particularidades de autenticación y consejos prácticos para cada equipo:
 
-## Skill de Asistencia
+- [docs/mikrotik.md](docs/mikrotik.md) — Comandos SSH en RouterOS, diferencias entre v6 y v7, fuentes redundantes.
+- [docs/aircontrol.md](docs/aircontrol.md) — Sesiones en Ubiquiti AirControl, agrupamiento de radios, umbrales de SNR.
+- [docs/netonix.md](docs/netonix.md) — Autenticación web en Netonix WS, monitoreo de RPM de fans, límites térmicos.
+- [docs/oltcloud.md](docs/oltcloud.md) — Integración con OLTs GPON, estados de ONU (`Online`, `LOS`, `Sin energía`), potencias ópticas.
+- [docs/edgeswitch.md](docs/edgeswitch.md) — Tokens de sesión en Ubiquiti EdgeSwitch, contadores de error en puertos.
+- [docs/swos.md](docs/swos.md) — Autenticación digest y telemetría binaria en MikroTik SwOS.
 
-Este repo incluye un [skill](.claude/skills/isp-network-monitor/SKILL.md) que
-guía el proceso de configuración y adaptación de este proyecto a diferentes
-topologías y entornos de red multimarca (paso a paso de integraciones, verificación
-de conectividad y buenas prácticas). Copiá la carpeta
-`.claude/skills/isp-network-monitor/` a tu propio entorno de desarrollo.
+---
 
 ## Licencia
 
-MIT — ver `LICENSE`.
+Este proyecto está publicado bajo la [Licencia MIT](LICENSE) — libre para usar, modificar y adaptar a tu propia infraestructura.
